@@ -1,0 +1,23 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: postgres-aula
+    restart: always
+    environment:
+      POSTGRES_DB: aula_db
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: senha123
+    ports:
+      - "5438:5432"
+    networks:
+      - app-network
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres:/docker-entrypoint-initdb.d
+
+networks:
+  app-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
