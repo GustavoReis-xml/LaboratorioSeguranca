@@ -23,7 +23,7 @@ function Dashboard() {
   const [comentarios, setComentarios] = useState<Comentario[]>([]);
   const [novoComentario, setNovoComentario] = useState("");
   const [tipoCodigo, setTipoCodigo] = useState("codigoDeBarras");
-  const [htmlRetorno, setHtmlRetorno] = useState("");
+  const [codigoInfo, setCodigoInfo] = useState<{ tipo: string; urlImagem: string } | null>(null);
   const [csrfToken, SetCSRFToken] = useState("");
 
 
@@ -151,11 +151,11 @@ function Dashboard() {
   const buscarCodigo = async () => {
 
     try {
-      const response = await axios.get (
+      const response = await axios.get<{ tipo: string; urlImagem: string }>(
         `/usuario/codigo-qr-ou-barra?tipo=${tipoCodigo}`,
         {withCredentials: true}
       );
-      setHtmlRetorno(response.data);
+      setCodigoInfo(response.data);
     } catch (error){
       console.error ("erro ao buscar codigo", error);
     }
@@ -246,18 +246,24 @@ function Dashboard() {
       </button>
 
 
-      {/* [CENÁRIO DE LABORATÓRIO - REFLECTED XSS INTENCIONAL]
-          Aqui mantemos o dangerouslySetInnerHTML propositalmente para o laboratório de XSS Refletido.
-          Ele renderiza o retorno cru da rota /usuario/codigo-qr-ou-barra?tipo=..., que não é sanitizado no backend,
-          permitindo demonstrar como um parâmetro malicioso na URL pode executar scripts no navegador. */}
-      {htmlRetorno && (
+      {/* 
+        [MUDANÇA DE SEGURANÇA - CORREÇÃO DE REFLECTED XSS NO FRONTEND]
+        Como era antes (Vulnerável):
+        Utilizava <div dangerouslySetInnerHTML={{ __html: htmlRetorno }} /> renderizando
+        o HTML cru enviado pelo servidor, permitindo execução de JavaScript malicioso injetado via URL.
 
-        <div
-          dangerouslySetInnerHTML={{
-            __html: htmlRetorno,
-          }}
-        />
-
+        Como foi corrigido:
+        Eliminação total do dangerouslySetInnerHTML. O React agora renderiza os dados diretamente
+        via JSX seguro ({codigoInfo.tipo} e tag <img src={codigoInfo.urlImagem} />), aplicando
+        o escape automático de strings e protegendo contra ataques XSS.
+      */}
+      {codigoInfo && (
+        <div style={{ marginTop: "15px" }}>
+          <h4>Tipo selecionado: {codigoInfo.tipo}</h4>
+          {codigoInfo.urlImagem && (
+            <img src={codigoInfo.urlImagem} alt="Código gerado" />
+          )}
+        </div>
       )}
 
 

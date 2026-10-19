@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import db from "../database";
 import jwt from "jsonwebtoken";
+import xss from "xss";
 import ValidarToken from "../Services/jwtServices";
 
 
@@ -65,46 +66,42 @@ export const login = async (req: Request, res: Response) => {
 };
 
 
-// [CENÁRIO DE LABORATÓRIO - SQL INJECTION INTENCIONAL]
-// Esta função NÃO teve a query parametrizada aplicada.
-// Ela mantém a concatenação direta com `${nome}`, `${email}`, `${password}` propositalmente
-// para demonstrar em laboratório como um invasor pode burlar a checagem ou injetar comandos SQL.
+// [MUDANÇA DE SEGURANÇA - SQL INJECTION CORRIGIDO]
+// Como era antes (vulnerável a SQL Injection por concatenação de strings):
+// const queryNomeIpuExiste = `SELECT * FROM iptu WHERE nome = '${nome}'`;
+// const query = `INSERT INTO usuario (email, senha, nome, tipo_usuario_id) VALUES ('${email}', '${password}', '${nome}', 3)`;
+// const queryIdUsuario = `SELECT id FROM usuario WHERE email = '${email}' AND senha = '${password}'`;
+// const queryUpdateTabelaIptu = `UPDATE iptu SET usuario_id = '${resultIdUsuario.rows[0].id}' WHERE nome = '${nome}'`;
+//
+// Como foi corrigido:
+// Todas as queries foram parametrizadas utilizando placeholders ($1, $2, $3) e array de parâmetros no Pool.
 export const novoLogin = async (req: Request, res: Response) => {
     const { email, password, nome } = req.body;
 
-    const queryNomeIpuExiste =
-        `SELECT * FROM iptu WHERE nome = '${nome}'`;
-
+    const queryNomeIpuExiste = `SELECT * FROM iptu WHERE nome = $1`;
     console.log(`Query Executada: ${queryNomeIpuExiste}`);
 
-    const iptuResult = await db.query(queryNomeIpuExiste);
+    const iptuResult = await db.query(queryNomeIpuExiste, [nome]);
 
     if (iptuResult.rowCount && iptuResult.rowCount > 0) {
 
         const query =
             `INSERT INTO usuario (email, senha, nome, tipo_usuario_id)
-             VALUES ('${email}', '${password}', '${nome}', 3)`;
+             VALUES ($1, $2, $3, 3) RETURNING id`;
 
         console.log(`Query Executada: ${query}`);
 
-        const result = await db.query(query);
-
-        const queryIdUsuario =
-            `SELECT id FROM usuario
-             WHERE email = '${email}' AND senha = '${password}'`;
-
-        console.log(`Query Executada: ${queryIdUsuario}`);
-
-        const resultIdUsuario = await db.query(queryIdUsuario);
+        const result = await db.query(query, [email, password, nome]);
+        const idUsuario = result.rows[0].id;
 
         const queryUpdateTabelaIptu =
             `UPDATE iptu
-             SET usuario_id = '${resultIdUsuario.rows[0].id}'
-             WHERE nome = '${nome}'`;
+             SET usuario_id = $1
+             WHERE nome = $2`;
 
         console.log(`Query Executada: ${queryUpdateTabelaIptu}`);
 
-        const resultUpdate = await db.query(queryUpdateTabelaIptu);
+        const resultUpdate = await db.query(queryUpdateTabelaIptu, [idUsuario, nome]);
 
         if (
             result.rowCount &&
@@ -114,15 +111,14 @@ export const novoLogin = async (req: Request, res: Response) => {
         ) {
 
             res.json({
-            success: true,
-            user: result.rows[0]
-        
+                success: true,
+                user: result.rows[0]
             });
 
         } else {
             res.status(401).json({
                 success: false,
-                message: "Falha no login"
+                message: "Falha no cadastro"
             });
         }
 
@@ -135,10 +131,13 @@ export const novoLogin = async (req: Request, res: Response) => {
 };
 
 
-// [CENÁRIO DE LABORATÓRIO - SQL INJECTION INTENCIONAL]
-// Embora a rota esteja protegida por authJWT([1]) (apenas Admin), a query em si
-// ainda utiliza interpolação de strings `${novoValor}` e `${usuarioId}`, servindo como
-// exemplo de vulnerabilidade de injeção em funcionalidades internas/administrativas.
+// [MUDANÇA DE SEGURANÇA - SQL INJECTION CORRIGIDO]
+// Como era antes (vulnerável a SQL Injection por concatenação):
+// const query = `UPDATE iptu SET valor = '${novoValor}' WHERE usuario_id = '${usuarioId}'`;
+// await db.query(query);
+//
+// Como foi corrigido:
+// Query parametrizada com placeholders $1 e $2, impedindo qualquer injeção de SQL.
 export const atualizarIptu = async (req: Request, res: Response) => {
     const {
         usuarioId,
@@ -147,13 +146,13 @@ export const atualizarIptu = async (req: Request, res: Response) => {
 
     const query =
         `UPDATE iptu
-         SET valor = '${novoValor}'
-         WHERE usuario_id = '${usuarioId}'`;
+         SET valor = $1
+         WHERE usuario_id = $2`;
 
     console.log(`Query Executada: ${query}`);
 
     try {
-        await db.query(query);
+        await db.query(query, [novoValor, usuarioId]);
 
         res.json({
             message: "IPTU atualizado"
@@ -167,20 +166,24 @@ export const atualizarIptu = async (req: Request, res: Response) => {
 };
 
 
-// [MUDANÇA DE SEGURANÇA - CORREÇÃO DE BROKEN ACCESS CONTROL (IDOR)]
-// No repo base: O usuarioId vinha de req.body (enviado pelo cliente).
-// Qualquer usuário podia trocar o ID na requisição e ver o IPTU de outro munícipe!
-// Atual: O ID é obtido diretamente de res.locals.payload.id (garantido pelo token JWT validado).
+// [MUDANÇA DE SEGURANÇA - BROKEN ACCESS CONTROL & SQL INJECTION CORRIGIDOS]
+// Como era antes:
+// 1. O usuarioId vinha de req.body (cliente podia adulterar o ID e ver dados de outros municípes - IDOR).
+// 2. Query interpolada: `SELECT * FROM iptu WHERE usuario_id = '${usuarioId}'`.
+//
+// Como foi corrigido:
+// 1. O ID é obtido de res.locals.payload.id (garantido pelo token JWT assinado).
+// 2. Query parametrizada com placeholder $1.
 export const getIptuPorIdUsuario = async (req: Request, res: Response) => {
     const payload = res.locals.payload;
     const query =
-        `SELECT * FROM iptu WHERE usuario_id = '${payload.id}'`;
+        `SELECT * FROM iptu WHERE usuario_id = $1`;
 
     console.log(`Query Executada: ${query}`);
 
     try {
 
-        const result = await db.query(query);
+        const result = await db.query(query, [payload.id]);
 
         console.log(`Retorno: ${JSON.stringify(result.rows)}`);
 
@@ -224,33 +227,33 @@ export const getIptus = async (
 };
 
 
-// [CENÁRIO DE LABORATÓRIO - REFLECTED XSS INTENCIONAL]
-// Esta rota pega o parâmetro da query 'req.query.tipo' e reflete diretamente na resposta HTML:
-// <h2>Tipo selecionado: ${tipo}</h2> sem escapar nem sanitizar.
-// No frontend, é renderizado usando 'dangerouslySetInnerHTML', permitindo a injeção de scripts (ex: ?tipo=<script>alert(1)</script>).
+// [MUDANÇA DE SEGURANÇA - REFLECTED XSS CORRIGIDO]
+// Como era antes (vulnerável a Reflected XSS):
+// const tipo = req.query.tipo as string;
+// res.send(`<h2>Tipo selecionado: ${tipo}</h2>${codigoHtml}`);
+// -> O parâmetro 'tipo' era refletido sem sanitização diretamente no HTML.
+//
+// Como foi corrigido:
+// 1. Sanitização de entrada com a biblioteca 'xss'.
+// 2. Resposta em formato estruturado (JSON) com { tipo, urlImagem },
+//    permitindo ao frontend renderizar com tags seguras do React sem dangerouslySetInnerHTML.
 export const getQRCodeOrCodBarras = async (
     req: Request,
     res: Response
 ) => {
+    const tipoBruto = (req.query.tipo as string) || "";
+    // Sanitização com a biblioteca xss
+    const tipoSanitizado = xss(tipoBruto);
 
-    const tipo = req.query.tipo as string;
-
-
-    let codigoHtml = "";
-
-    if (tipo === "codigoDeBarras") {
-
-        codigoHtml =
-            `<img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=123456789" />`;
-
-    } else if (tipo === "qrcode") {
-
-        codigoHtml =
-            `<img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=QRCodeDemo" />`;
+    let urlImagem = "";
+    if (tipoSanitizado === "codigoDeBarras") {
+        urlImagem = "https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=123456789";
+    } else if (tipoSanitizado === "qrcode") {
+        urlImagem = "https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=QRCodeDemo";
     }
 
-    res.send(`
-        <h2>Tipo selecionado: ${tipo}</h2>
-        ${codigoHtml}
-    `);
+    res.json({
+        tipo: tipoSanitizado,
+        urlImagem
+    });
 };

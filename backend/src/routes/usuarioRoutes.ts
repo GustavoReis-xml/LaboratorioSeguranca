@@ -9,20 +9,26 @@ const router = Router();
 // Rota de login: Autentica o usuário e gera cookie JWT com HttpOnly e SameSite
 router.post("/login", login);
 
-// [CENÁRIO DE LABORATÓRIO]: Rota de cadastro mantida com queries concatenadas para demonstração didática de SQL Injection
+// [MUDANÇA DE SEGURANÇA - SQL INJECTION CORRIGIDO]
+// Como era antes: Rota vulnerável a injeção SQL no cadastro de novos usuários por concatenação de strings.
+// Como foi corrigido: A controller 'novoLogin' agora utiliza queries preparadas/parametrizadas com placeholders ($1, $2, $3).
 router.post("/novo-login", novoLogin);
 
-// [MUDANÇA DE SEGURANÇA - CONTROLE DE ACESSO (BROKEN ACCESS CONTROL)]
-// No repo base: router.post("/atualizar-iptu", atualizarIptu) - qualquer um podia atualizar!
-// Atual: Alterado para PUT e protegido por authJWT([1]), permitindo apenas Administradores (perfil tipo 1).
-router.put("/atualizar-iptu", authJWT([1]), atualizarIptu);
+// [MUDANÇAS DE SEGURANÇA - CONTROLE DE ACESSO & TOKEN ANTI-CSRF]
+// Como era antes: router.post("/atualizar-iptu", atualizarIptu) - aberta a qualquer usuário e sem validação CSRF!
+// Como foi corrigido:
+// 1. verifyToken: Garante que a requisição mutante contenha o token anti-CSRF válido.
+// 2. authJWT([1]): Permite apenas Administradores autenticados (perfil tipo 1).
+router.put("/atualizar-iptu", verifyToken, authJWT([1]), atualizarIptu);
 
-// [MUDANÇA DE SEGURANÇA - AUTENTICAÇÃO JWT]
-// No repo base: O usuarioId vinha no body enviado pelo cliente (inseguro).
-// Atual: Rota protegida por authJWT, garantindo que o usuário só consiga consultar os dados da sua própria sessão.
+// [MUDANÇA DE SEGURANÇA - AUTENTICAÇÃO JWT & IDOR]
+// Como era antes: O usuarioId vinha no body enviado pelo cliente (vulnerável a IDOR).
+// Como foi corrigido: Rota protegida por authJWT, obtendo o ID do usuário diretamente do payload do token.
 router.get("/iptu-por-usuario", authJWT, getIptuPorIdUsuario);
 
-// [CENÁRIO DE LABORATÓRIO]: Rota protegida por JWT, mas vulnerável a Reflected XSS no parâmetro 'tipo'
+// [MUDANÇA DE SEGURANÇA - REFLECTED XSS CORRIGIDO & JWT]
+// Como era antes: Parâmetro 'tipo' da URL era concatenado diretamente em HTML retornado.
+// Como foi corrigido: Protegida por authJWT e parâmetro sanitizado com a biblioteca 'xss'.
 router.get("/codigo-qr-ou-barra", authJWT, getQRCodeOrCodBarras);
 
 // Rota de listagem geral de IPTUs protegida por autenticação JWT

@@ -17,6 +17,7 @@ function Gerenciamento() {
   const [iptus, setIptus] = useState<Iptuu[]>([]);
   const [novoValor, setNovoValor] = useState<{ [key: number]: number }>({});
   const [menuAberto, setMenuAberto] = useState(false);
+  const [csrfToken, setCsrfToken] = useState("");
 
 
   useEffect(() => {
@@ -24,9 +25,10 @@ function Gerenciamento() {
     const buscarDados = async () => {
 
       try {
-        // [MUDANÇA DE SEGURANÇA - CONTROLE DE ACESSO NO FRONTEND]
-        // No repo base: Lia usuário do localStorage sem validação real com o servidor.
-        // Atual: Valida a sessão via /usuario/payload-usuario com cookies HttpOnly.
+        // [MUDANÇA DE SEGURANÇA - CONTROLE DE ACESSO & TOKEN ANTI-CSRF NO FRONTEND]
+        // Como era antes: Lia usuário do localStorage sem validação real com o servidor.
+        // Como foi corrigido: Valida a sessão via /usuario/payload-usuario com cookies HttpOnly
+        // e recebe o token anti-CSRF para requisições de alteração.
         // Se a resposta for 403 (Forbidden), o usuário sem privilégio é barrado e redirecionado.
         const responsePayload = await axios.get(
           "/usuario/payload-usuario",
@@ -44,6 +46,7 @@ function Gerenciamento() {
         }
 
         setUser(responsePayload.data.payload);
+        setCsrfToken(responsePayload.data.csrfToken);
 
         const response = await axios.get<{
           iptu: Iptuu[]
@@ -80,15 +83,26 @@ function Gerenciamento() {
   ) => {
 
     try {
-      // [MUDANÇA DE SEGURANÇA - AUTENTICAÇÃO E ROTA PROTEGIDA]
-      // A rota backend PUT /usuario/atualizar-iptu é restrita ao perfil Admin (authJWT([1])).
-      // Enviamos withCredentials: true para transmitir o cookie HttpOnly de autenticação.
+      // [MUDANÇA DE SEGURANÇA - CONTROLE DE ACESSO & TOKEN ANTI-CSRF]
+      // Como era antes:
+      // A requisição era disparada sem token CSRF e sem validação se o usuário era administrador.
+      //
+      // Como foi corrigido:
+      // 1. Enviamos o cabeçalho 'X-CSRF-Token' para validação do middleware verifyToken.
+      // 2. Enviamos withCredentials: true para transmitir o cookie HttpOnly de autenticação
+      //    validado por authJWT([1]), garantindo que apenas administradores atualizem o IPTU.
       await axios.put(
         "/usuario/atualizar-iptu",
         {
           usuarioId: usuarioId,
           novoValor: novoValor[usuarioId]
-        }, {withCredentials: true}
+        },
+        {
+          headers: {
+            "X-CSRF-Token": csrfToken
+          },
+          withCredentials: true
+        }
       );
 
 
